@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/beevik/guid"
 	"github.com/pjebs/jsonerror"
 	"github.com/unrolled/render"
+	"golang.org/x/crypto/argon2"
 	"gorm.io/gorm"
 	"net/http"
 )
@@ -14,17 +16,35 @@ type UserService struct {
 
 type User struct {
 	gorm.Model
+	FirstName string
+	LastName  string
+	GUID      string
+	Password  []byte
+	ELO       int
+}
+
+type NewUserRequest struct {
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
-	ELO       int
+	Password  string `json:"password"`
+}
+
+type NewUserResponse struct {
+	Successful bool `json:"success"`
 }
 
 func (service *UserService) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
-		user := &User{}
-		err := json.NewDecoder(r.Body).Decode(user)
+		request := &NewUserRequest{}
+		err := json.NewDecoder(r.Body).Decode(request)
 
-		user.ELO = 1200
+		user := &User{
+			FirstName: request.FirstName,
+			LastName:  request.LastName,
+			ELO:       1200,
+			GUID:      guid.NewString(),
+		}
+		user.Password = argon2.IDKey([]byte(request.Password), []byte(user.GUID), 1, 64*1024, 4, 32)
 
 		if err != nil {
 			panic(err)
@@ -45,7 +65,7 @@ func (service *UserService) HandleRegister(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		err = render.New().JSON(w, http.StatusCreated, user)
+		err = render.New().JSON(w, http.StatusCreated, &NewUserResponse{Successful: true})
 		if err != nil {
 			panic(err)
 		}
