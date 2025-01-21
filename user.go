@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -41,11 +42,12 @@ type UnverifiedUser struct {
 	gorm.Model
 	FirstName string    `gorm:"not null"`
 	LastName  string    `gorm:"not null"`
-	GUID      string    `gorm:"not null"`
+	GUID      string    `gorm:"unique,not null"`
 	Email     string    `gorm:"not null"`
 	Token     string    `gorm:"not null"`
 	Password  []byte    `gorm:"not null"`
 	Expiry    time.Time `gorm:"not null"`
+	Activated sql.NullTime
 }
 
 type NewUserRequest struct {
@@ -60,21 +62,21 @@ type NewUserResponse struct {
 	Error      map[string]string `json:"error,omitempty"`
 }
 
-// Utility function to render error templates
+// RenderErrorTemplate Utility function to render error templates
 func RenderErrorTemplate(w http.ResponseWriter, templateName string, data interface{}) {
 	if err := render.New().HTML(w, http.StatusOK, templateName, data); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// Utility function to render JSON responses
+// RenderJSONResponse Utility function to render JSON responses
 func RenderJSONResponse(w http.ResponseWriter, status int, response interface{}) {
 	if err := render.New().JSON(w, status, response); err != nil {
 		log.Println(err)
 	}
 }
 
-// Utility function to generate random tokens
+// GenerateRandomToken Utility function to generate random tokens
 func GenerateRandomToken() (string, error) {
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
@@ -83,7 +85,7 @@ func GenerateRandomToken() (string, error) {
 	return hex.EncodeToString(token), nil
 }
 
-// Utility function to hash passwords using argon2
+// HashPassword Utility function to hash passwords using argon2
 func HashPassword(password string, salt string) []byte {
 	return argon2.IDKey([]byte(password), []byte(salt), 1, 64*1024, 4, 32)
 }
@@ -96,18 +98,18 @@ func NewUserError(code int, error, message string) *NewUserResponse {
 	}
 }
 
-// Check if a user with the given email exists in the database
+// EmailExists Check if a user with the given email exists in the database
 func (service *UserService) EmailExists(email string) bool {
 	return service.db.First(&User{}, "email = ?", email).RowsAffected > 0
 }
 
-// Check if an unverified user with the given email and token exists in the database
+// UnverifiedUserExists Check if an unverified user with the given email and token exists in the database
 func (service *UserService) UnverifiedUserExists(email, token string) bool {
 	var unverifiedUser UnverifiedUser
 	return service.db.First(&unverifiedUser, "email = ? AND token = ?", email, token).Error == nil
 }
 
-// Create and send a verification email
+// SendVerificationEmail Create and send a verification email
 func (service *UserService) SendVerificationEmail(user UnverifiedUser, host string) {
 	tpl, err := ParseTemplate("verify-email.tmpl", fmt.Sprintf("http://%s/verify?token=%s&email=%s", host, user.Token, url.QueryEscape(user.Email)))
 	if err != nil {
@@ -125,7 +127,7 @@ func (service *UserService) SendVerificationEmail(user UnverifiedUser, host stri
 	}
 }
 
-// Parse and execute a template file
+// ParseTemplate Parse and execute a template file
 func ParseTemplate(templateName, data string) (string, error) {
 	t, err := template.New(templateName).ParseFiles("./templates/" + templateName)
 	if err != nil {
@@ -159,6 +161,11 @@ func (service *UserService) VerifyUser(w http.ResponseWriter, r *http.Request) {
 
 	var unverifiedUser UnverifiedUser
 	service.db.First(&unverifiedUser, "email = ? AND token = ?", email, token)
+
+	if unverifiedUser.Activated.Valid && unverifiedUser.Activated.Time.Before(time.Now()) {
+		RenderErrorTemplate(w, "successfully-verified", map[string]string{"Name": unverifiedUser.FirstName})
+		return
+	}
 
 	// Check if verification token has expired
 	if time.Now().After(unverifiedUser.Expiry) {
@@ -194,18 +201,24 @@ func (service *UserService) VerifyUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete the unverified user
-	if err := service.db.Delete(&unverifiedUser).Error; err != nil {
+	unverifiedUser.Activated = sql.NullTime{
+		Time:  time.Now(),
+		Valid: true,
+	}
+
+	// Mark the link as used
+	if err := service.db.Save(&unverifiedUser).Error; err != nil {
 		log.Println(err)
 		ShowError(w)
 		return
 	}
 
 	// Send the success response
-	if tpl, err := ParseTemplate("successfully-verified.tmpl", user.FirstName); err != nil {
-		panic(err)
-	} else {
-		w.Write([]byte(tpl))
+	err := render.New().HTML(w, http.StatusOK, "successfully-verified", map[string]string{
+		"Name": unverifiedUser.FirstName,
+	})
+	if err != nil {
+		log.Println(err)
 	}
 }
 
