@@ -22,21 +22,22 @@ func main() {
 		panic(err)
 	}
 
-	if err = db.AutoMigrate(&User{}); err != nil {
+	if err = db.AutoMigrate(&Game{}); err != nil {
 		panic(err)
 	}
 
-	if err = db.AutoMigrate(&UnverifiedUser{}); err != nil {
-		panic(err)
-	}
+	userService := NewUserService(
+		db,
+		gomail.NewDialer("smtp.gmail.com", 587, os.Getenv("EMAIL_ADDRESS"), os.Getenv("EMAIL_PASSWORD")),
+		os.Getenv("PRIVATE_KEY_PATH"),
+	)
 
-	userService := &UserService{
-		db:          db,
-		emailDialer: gomail.NewDialer("smtp.gmail.com", 587, os.Getenv("EMAIL_ADDRESS"), os.Getenv("EMAIL_PASSWORD")),
-	}
+	gameService := NewGameService(db, userService)
 
 	http.HandleFunc("/register", userService.HandleRegister)
 	http.HandleFunc("/verify", userService.VerifyUser)
+	http.HandleFunc("/login", userService.Login)
+	http.HandleFunc("/matchmaking", gameService.NewGame)
 
 	err = http.ListenAndServe(":8080", nil)
 }

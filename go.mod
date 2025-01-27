@@ -3,9 +3,12 @@ module checkers
 go 1.23
 
 require (
-	github.com/beevik/guid v1.0.0
+	github.com/golang-jwt/jwt v3.2.2+incompatible
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/pjebs/jsonerror v0.0.0-20190614034432-63ef9a8df848
+	github.com/scizorman/go-ndjson v0.0.0-20200902005011-1d92486df71e
 	github.com/unrolled/render v1.7.0
 	golang.org/x/crypto v0.32.0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df

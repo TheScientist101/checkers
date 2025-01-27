@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -12,10 +13,12 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/beevik/guid"
+	"github.com/golang-jwt/jwt"
+	"github.com/google/uuid"
 	"github.com/pjebs/jsonerror"
 	"github.com/unrolled/render"
 	"golang.org/x/crypto/argon2"
@@ -26,28 +29,33 @@ import (
 type UserService struct {
 	db          *gorm.DB
 	emailDialer *gomail.Dialer
+	privateKey  crypto.PrivateKey
 }
 
 type User struct {
-	gorm.Model
-	FirstName string `gorm:"not null"`
-	LastName  string `gorm:"not null"`
-	GUID      string `gorm:"unique,not null"`
-	Password  []byte `gorm:"not null"`
-	ELO       int    `gorm:"not null"`
-	Email     string `gorm:"unique,not null"`
+	UUID               uuid.UUID `gorm:"primaryKey;unique;type:uuid"`
+	FirstName          string    `gorm:"not null"`
+	LastName           string    `gorm:"not null"`
+	Password           []byte    `gorm:"not null"`
+	ELO                int       `gorm:"not null"`
+	Email              string    `gorm:"unique,not null"`
+	RefreshToken       string
+	AccessToken        string
+	RefreshTokenExpiry sql.NullTime
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
 type UnverifiedUser struct {
-	gorm.Model
-	FirstName string    `gorm:"not null"`
-	LastName  string    `gorm:"not null"`
-	GUID      string    `gorm:"unique,not null"`
-	Email     string    `gorm:"not null"`
-	Token     string    `gorm:"not null"`
-	Password  []byte    `gorm:"not null"`
-	Expiry    time.Time `gorm:"not null"`
-	Activated sql.NullTime
+	UUID              uuid.UUID `gorm:"primaryKey;unique;type:uuid"`
+	FirstName         string    `gorm:"not null"`
+	LastName          string    `gorm:"not null"`
+	Email             string    `gorm:"not null"`
+	VerificationToken string    `gorm:"not null"`
+	Password          []byte    `gorm:"not null"`
+	Expiry            time.Time `gorm:"not null"`
+	Activated         sql.NullTime
 }
 
 type NewUserRequest struct {
@@ -60,6 +68,30 @@ type NewUserRequest struct {
 type NewUserResponse struct {
 	Successful bool              `json:"success"`
 	Error      map[string]string `json:"error,omitempty"`
+}
+
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+func NewUserService(db *gorm.DB, emailDialer *gomail.Dialer, pemPath string) *UserService {
+	pem, err := os.ReadFile(pemPath)
+	if err != nil {
+		panic(err)
+	}
+
+	privateKey, err := jwt.ParseECPrivateKeyFromPEM(pem)
+
+	if err = db.AutoMigrate(&User{}); err != nil {
+		panic(err)
+	}
+
+	if err = db.AutoMigrate(&UnverifiedUser{}); err != nil {
+		panic(err)
+	}
+
+	return &UserService{db, emailDialer, privateKey}
 }
 
 // RenderErrorTemplate Utility function to render error templates
@@ -76,8 +108,8 @@ func RenderJSONResponse(w http.ResponseWriter, status int, response interface{})
 	}
 }
 
-// GenerateRandomToken Utility function to generate random tokens
-func GenerateRandomToken() (string, error) {
+// GenerateVerificationToken Utility function to generate random tokens
+func GenerateVerificationToken() (string, error) {
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
 		return "", err
@@ -104,14 +136,14 @@ func (service *UserService) EmailExists(email string) bool {
 }
 
 // UnverifiedUserExists Check if an unverified user with the given email and token exists in the database
-func (service *UserService) UnverifiedUserExists(email, token string) bool {
+func (service *UserService) UnverifiedUserExists(email, verificationToken string) bool {
 	var unverifiedUser UnverifiedUser
-	return service.db.First(&unverifiedUser, "email = ? AND token = ?", email, token).Error == nil
+	return service.db.First(&unverifiedUser, "email = ? AND verification_token = ?", email, verificationToken).Error == nil
 }
 
 // SendVerificationEmail Create and send a verification email
 func (service *UserService) SendVerificationEmail(user UnverifiedUser, host string) {
-	tpl, err := ParseTemplate("verify-email.tmpl", fmt.Sprintf("http://%s/verify?token=%s&email=%s", host, user.Token, url.QueryEscape(user.Email)))
+	tpl, err := ParseTemplate("verify-email.tmpl", fmt.Sprintf("http://%s/verify?token=%s&email=%s", host, user.VerificationToken, url.QueryEscape(user.Email)))
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -147,7 +179,7 @@ func ShowError(w http.ResponseWriter) {
 }
 
 func (service *UserService) VerifyUser(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
+	if r.Method != http.MethodGet {
 		return
 	}
 
@@ -160,7 +192,7 @@ func (service *UserService) VerifyUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var unverifiedUser UnverifiedUser
-	service.db.First(&unverifiedUser, "email = ? AND token = ?", email, token)
+	service.db.First(&unverifiedUser, "email = ? AND verification_token = ?", email, token)
 
 	if unverifiedUser.Activated.Valid && unverifiedUser.Activated.Time.Before(time.Now()) {
 		RenderErrorTemplate(w, "successfully-verified", map[string]string{"Name": unverifiedUser.FirstName})
@@ -189,7 +221,7 @@ func (service *UserService) VerifyUser(w http.ResponseWriter, r *http.Request) {
 	user := &User{
 		FirstName: unverifiedUser.FirstName,
 		LastName:  unverifiedUser.LastName,
-		GUID:      unverifiedUser.GUID,
+		UUID:      unverifiedUser.UUID,
 		Password:  unverifiedUser.Password,
 		ELO:       1200,
 		Email:     unverifiedUser.Email,
@@ -223,14 +255,15 @@ func (service *UserService) VerifyUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (service *UserService) HandleRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
+	if r.Method != http.MethodPost {
 		return
 	}
 
 	var request NewUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		log.Println(err)
-		ShowError(w)
+		response := NewUserError(1, "Invalid JSON request", err.Error())
+		RenderJSONResponse(w, http.StatusBadRequest, response)
 		return
 	}
 
@@ -265,26 +298,215 @@ func (service *UserService) ProcessUser(request *NewUserRequest, w http.Response
 		return nil, fmt.Errorf("account already exists with email: %s", email)
 	}
 
-	// Generate the unverified user
-	user := &UnverifiedUser{
-		FirstName: request.FirstName,
-		LastName:  request.LastName,
-		GUID:      guid.NewString(),
-		Email:     email,
-		Password:  HashPassword(request.Password, guid.NewString()),
-	}
-
-	// Generate token and expiry
-	token, err := GenerateRandomToken()
+	userID, err := uuid.NewRandom()
 	if err != nil {
 		return nil, err
 	}
 
-	user.Token = token
+	// Generate the unverified user
+	user := &UnverifiedUser{
+		FirstName: request.FirstName,
+		LastName:  request.LastName,
+		UUID:      userID,
+		Email:     email,
+		Password:  HashPassword(request.Password, userID.String()),
+	}
+
+	// Generate token and expiry
+	token, err := GenerateVerificationToken()
+	if err != nil {
+		return nil, err
+	}
+
+	user.VerificationToken = token
 	user.Expiry = time.Now().Add(time.Hour * 24 * 7)
 
 	// Send verification email asynchronously
 	go service.SendVerificationEmail(*user, host)
 
 	return user, nil
+}
+
+type LoginResponse struct {
+	Successful  bool   `json:"success"`
+	AccessToken string `json:"access_token"`
+}
+
+func (service *UserService) Login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		return
+	}
+
+	var request LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		log.Println(err)
+		response := NewUserError(1, "Invalid JSON request", err.Error())
+		RenderJSONResponse(w, http.StatusBadRequest, response)
+		return
+	}
+
+	user := &User{
+		Email: request.Email,
+	}
+
+	if !service.EmailExists(request.Email) {
+		response := NewUserError(13, "Email not found.", "Email not found: "+request.Email)
+		RenderJSONResponse(w, http.StatusBadRequest, response)
+		return
+	}
+
+	service.db.First(user, "email = ?", request.Email)
+
+	if bytes.Equal(HashPassword(request.Password, user.UUID.String()), user.Password) {
+		accessToken, err := service.GenerateAccessToken(user)
+		if err != nil {
+			log.Println(err)
+			response := NewUserError(14, "Error signing token", err.Error())
+			RenderJSONResponse(w, http.StatusInternalServerError, response)
+			return
+		}
+
+		refreshToken, err := uuid.NewRandom()
+		if err != nil {
+			log.Println(err)
+			response := NewUserError(15, "Error creating refresh token", err.Error())
+			RenderJSONResponse(w, http.StatusInternalServerError, response)
+			return
+		}
+
+		user.RefreshToken = refreshToken.String()
+		user.AccessToken = accessToken
+		user.RefreshTokenExpiry = sql.NullTime{
+			Time:  time.Now().Add(time.Hour * 24 * 7),
+			Valid: true,
+		}
+
+		service.db.Save(user)
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "refresh_token",
+			Value:    user.RefreshToken,
+			HttpOnly: true,
+			Domain:   r.Host,
+		})
+
+		RenderJSONResponse(w, 200, &LoginResponse{true, accessToken})
+		return
+	}
+
+	response := NewUserError(15, "Invalid password", "Invalid password")
+	RenderJSONResponse(w, http.StatusBadRequest, response)
+	return
+}
+
+func (service *UserService) GenerateAccessToken(user *User) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodES256,
+		jwt.MapClaims{
+			"uuid":   user.UUID,
+			"expiry": time.Now().Add(time.Minute * 15).Unix(),
+		})
+
+	signedString, err := token.SignedString(service.privateKey)
+	if err != nil {
+		return "", err
+	}
+
+	return signedString, nil
+}
+
+type RefreshTokenResponse struct {
+	AccessToken string    `json:"access_token"`
+	Expiry      time.Time `json:"expiry"`
+}
+
+func (service *UserService) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		return
+	}
+
+	email := strings.ToLower(r.URL.Query().Get("email"))
+
+	if !service.EmailExists(email) {
+		response := NewUserError(13, "Email not found.", "Email not found: "+email)
+		RenderJSONResponse(w, http.StatusBadRequest, response)
+		return
+	}
+
+	refreshToken, err := r.Cookie("refresh_token")
+	if err != nil {
+		response := NewUserError(14, "Invalid refresh token.", err.Error())
+		RenderJSONResponse(w, http.StatusInternalServerError, response)
+		return
+	}
+
+	user := &User{
+		Email:        email,
+		RefreshToken: refreshToken.Value,
+	}
+
+	if service.db.First(&user, "email = ?", email).RowsAffected == 0 {
+		response := NewUserError(14, "Invalid refresh token.", "Invalid refresh token with email: "+email)
+		RenderJSONResponse(w, http.StatusBadRequest, response)
+		return
+	}
+
+	if time.Now().After(user.RefreshTokenExpiry.Time) {
+		response := NewUserError(15, "Refresh token is expired.", "Refresh token is expired. Please login again.")
+		RenderJSONResponse(w, http.StatusUnauthorized, response)
+		return
+	}
+
+	accessToken, err := service.GenerateAccessToken(user)
+	if err != nil {
+		log.Println(err)
+		response := NewUserError(14, "Error signing token", err.Error())
+		RenderJSONResponse(w, http.StatusInternalServerError, response)
+		return
+	}
+
+	RenderJSONResponse(w, 200, &RefreshTokenResponse{accessToken, time.Now().Add(time.Minute * 15)})
+}
+
+func (service *UserService) AuthenticateRequest(email, accessToken string) (*User, *NewUserResponse) {
+	if !service.EmailExists(email) {
+		return nil, NewUserError(13, "Email not found.", "Email not found: "+email)
+	}
+
+	token, err := jwt.Parse(accessToken, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+
+		return service.privateKey, nil
+	})
+
+	if err != nil {
+		return nil, NewUserError(14, "Error parsing token", err.Error())
+	}
+
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		expiryUnix, ok := claims["expiry"].(int64)
+		if !ok {
+			return nil, NewUserError(15, "Error parsing token expiry", "Error parsing token expiry")
+		}
+
+		expiry := time.Unix(expiryUnix, 0)
+		if time.Now().After(expiry) {
+			return nil, NewUserError(15, "Refresh token is expired", "Refresh token is expired")
+		}
+
+		userID, ok := claims["uuid"].(string)
+		if !ok {
+			return nil, NewUserError(16, "Error parsing token uuid", "Error parsing token uuid")
+		}
+
+		user := &User{}
+		if service.db.First(&user, "uuid = ?", userID).Error != nil {
+			return nil, NewUserError(17, "User not found.", "User not found: "+userID)
+		}
+
+		return user, nil
+	}
+
+	return nil, NewUserError(15, "Invalid token", "Invalid token")
 }
