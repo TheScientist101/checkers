@@ -32,12 +32,10 @@ func main() {
 		os.Getenv("PRIVATE_KEY_PATH"),
 	)
 
-	gameService := NewGameService(db, userService)
-
-	http.HandleFunc("/register", userService.HandleRegister)
-	http.HandleFunc("/verify", userService.VerifyUser)
-	http.HandleFunc("/login", userService.Login)
-	http.HandleFunc("/matchmaking", gameService.NewGame)
+	NewGameService(db, userService)
 
 	err = http.ListenAndServe(":8080", nil)
+	if err != nil {
+		panic(err)
+	}
 }

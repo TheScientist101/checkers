@@ -91,7 +91,13 @@ func NewUserService(db *gorm.DB, emailDialer *gomail.Dialer, pemPath string) *Us
 		panic(err)
 	}
 
-	return &UserService{db, emailDialer, privateKey}
+	service := &UserService{db, emailDialer, privateKey}
+
+	http.HandleFunc("/register", service.HandleRegister)
+	http.HandleFunc("/verify", service.VerifyUser)
+	http.HandleFunc("/login", service.Login)
+
+	return service
 }
 
 // RenderErrorTemplate Utility function to render error templates

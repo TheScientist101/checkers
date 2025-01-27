@@ -43,6 +43,9 @@ func NewGameService(db *gorm.DB, us *UserService) *GameService {
 	}
 
 	go service.Matchmaker()
+
+	http.HandleFunc("/matchmaking", service.NewGame)
+
 	return service
 }
 
@@ -123,7 +126,7 @@ func (gs *GameService) EventManager(w http.ResponseWriter, r *http.Request) {
 		}
 	}(conn)
 
-	conn.ReadJSON()
+	//conn.ReadJSON()
 
 	user, userErr := gs.us.AuthenticateRequest(r.URL.Query().Get("email"), r.Header.Get("Authorization"))
 	if userErr != nil {
@@ -162,7 +165,7 @@ type MoveResponse struct {
 func (gs *GameService) PlayGame(w http.ResponseWriter, r *http.Request, user *User, game *Game) {
 	var request MoveRequest
 	for {
-		err := json.NewDecoder().Decode(&request)
+		err := json.NewDecoder(r.Body).Decode(&request)
 		if err != nil {
 			log.Println(err)
 			RenderNDJSONResponse(w, http.StatusBadRequest, &MoveResponse{false, jsonerror.New(
