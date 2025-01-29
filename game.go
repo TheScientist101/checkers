@@ -1,30 +1,121 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/notnil/chess"
 	"github.com/pjebs/jsonerror"
 	"github.com/scizorman/go-ndjson"
 	"github.com/unrolled/render"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
+const (
+	// Time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
+
+	// Time allowed to read the next pong message from the peer.
+	pongWait = 60 * time.Second
+
+	// Send pings to peer with this period. Must be less than pongWait.
+	pingPeriod = (pongWait * 9) / 10
+)
+
 type Game struct {
-	gorm.Model
-	Players [2]string `gorm:"type:text[]"`
-	Moves   []string  `gorm:"type:text[]"`
+	ID        uint `gorm:"primarykey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	Players   datatypes.JSONSlice[string]
+	PGN       string
+	board     *chess.Game
+}
+
+type dataStream struct {
+	conn       *websocket.Conn
+	broadcast  chan interface{}
+	activeGame *Game
+}
+
+type socketMessage struct {
+	Type    string                 `json:"type"`
+	Payload map[string]interface{} `json:"payload"`
+}
+
+func (gs *GameService) readPump(user *User) {
+	ds := gs.streams[user.UUID.String()]
+	defer func(conn *websocket.Conn) {
+		conn.Close()
+		delete(gs.streams, user.UUID.String())
+	}(ds.conn)
+
+	if err := ds.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+		log.Printf("Error setting read deadline: %v", err)
+	}
+
+	ds.conn.SetPongHandler(func(string) error { return ds.conn.SetReadDeadline(time.Now().Add(pongWait)) })
+
+	for {
+		message := &socketMessage{}
+		err := ds.conn.ReadJSON(message)
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Println(err)
+				break
+			} else {
+				ds.broadcast <- jsonerror.New(1, "Invalid JSON request", err.Error())
+				continue
+			}
+		}
+
+		switch message.Type {
+		case "move":
+			gs.Move(user, message.Payload)
+		case "position":
+			gs.RetrieveActiveFEN(user)
+		}
+	}
+}
+
+func (gs *GameService) writePump(user *User) {
+	ds := gs.streams[user.UUID.String()]
+
+	ticker := time.NewTicker(pingPeriod)
+	defer ds.conn.Close()
+
+	for {
+		select {
+		case message := <-ds.broadcast:
+			if err := ds.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				log.Printf("Error setting write deadline: %v", err)
+			}
+
+			err := ds.conn.WriteJSON(message)
+			if err != nil {
+				return
+			}
+
+		case <-ticker.C:
+			ds.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := ds.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
 }
 
 type GameService struct {
 	db           *gorm.DB
 	us           *UserService
 	gameRequests chan string
-	notifiers    map[string]chan *Game
+	streams      map[string]*dataStream
 	upgrader     websocket.Upgrader
 }
 
@@ -39,12 +130,13 @@ func NewGameService(db *gorm.DB, us *UserService) *GameService {
 				return true
 			},
 		},
-		notifiers: make(map[string]chan *Game),
+		streams: make(map[string]*dataStream),
 	}
 
 	go service.Matchmaker()
 
 	http.HandleFunc("/matchmaking", service.NewGame)
+	http.HandleFunc("/events", service.EventManager)
 
 	return service
 }
@@ -74,13 +166,15 @@ func RenderNDJSONResponse(w http.ResponseWriter, status int, response interface{
 }
 
 type NewGameResponse struct {
-	Successful bool `json:"successful"`
+	Successful bool `json:"success"`
 }
 
 func (gs *GameService) NewGame(w http.ResponseWriter, r *http.Request) {
 	user, userErr := gs.us.AuthenticateRequest(r.URL.Query().Get("email"), r.Header.Get("Authorization"))
+
 	if userErr != nil {
 		RenderJSONResponse(w, http.StatusUnauthorized, userErr)
+		return
 	}
 
 	gs.gameRequests <- user.UUID.String()
@@ -89,90 +183,259 @@ func (gs *GameService) NewGame(w http.ResponseWriter, r *http.Request) {
 }
 
 func (gs *GameService) Matchmaker() {
-	gs.gameRequests = make(chan string)
+	gs.gameRequests = make(chan string, 100)
 	defer close(gs.gameRequests)
 
 	for {
-		players := [2]string{<-gs.gameRequests, <-gs.gameRequests}
+		players := []string{<-gs.gameRequests, <-gs.gameRequests}
 		game := &Game{
-			Players: players,
-			Moves:   make([]string, 0),
+			Players: datatypes.NewJSONSlice(players),
+			PGN:     "",
 		}
 
 		switch {
-		case gs.notifiers[players[0]] == nil && gs.notifiers[players[1]] == nil:
-			return
-		case gs.notifiers[players[0]] == nil || len(gs.notifiers[players[0]]) == 0:
+		case players[0] == players[1]:
+			gs.gameRequests <- players[0]
+		case gs.streams[players[0]] == nil && gs.streams[players[1]] == nil:
+		case gs.streams[players[0]] == nil || gs.streams[players[0]].activeGame != nil:
 			gs.gameRequests <- players[1]
-		case gs.notifiers[players[1]] == nil || len(gs.notifiers[players[1]]) == 0:
+		case gs.streams[players[1]] == nil || gs.streams[players[1]].activeGame != nil:
 			gs.gameRequests <- players[0]
 		default:
-			gs.notifiers[players[0]] <- game
-			gs.notifiers[players[1]] <- game
-			gs.db.Save(game)
-		}
-	}
-}
-
-func (gs *GameService) EventManager(w http.ResponseWriter, r *http.Request) {
-	conn, err := gs.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Print("upgrade:", err)
-	}
-	defer func(c *websocket.Conn) {
-		err := c.Close()
-		if err != nil {
-			log.Print("close:", err)
-		}
-	}(conn)
-
-	//conn.ReadJSON()
-
-	user, userErr := gs.us.AuthenticateRequest(r.URL.Query().Get("email"), r.Header.Get("Authorization"))
-	if userErr != nil {
-		RenderJSONResponse(w, http.StatusUnauthorized, userErr)
-	}
-
-	gs.notifiers[user.UUID.String()] = make(chan *Game, 1)
-	defer close(gs.notifiers[user.UUID.String()])
-
-	w.Header().Set("Transfer-Encoding", "chunked")
-
-	for {
-		select {
-		case game := <-gs.notifiers[user.UUID.String()]:
-			RenderNDJSONResponse(w, http.StatusOK, game)
-			gs.PlayGame(w, r, user, game)
-		case <-time.After(time.Second):
-			_, err := w.Write([]byte("\n"))
-			if err != nil {
-				log.Println(err)
-				return
+			gs.db.Create(game)
+			for _, player := range players {
+				gs.streams[player].broadcast <- game
+				gs.streams[player].activeGame = game
 			}
 		}
 	}
 }
 
+type AuthenticationRequest struct {
+	Email       string `json:"email"`
+	AccessToken string `json:"access_token"`
+}
+
+type EventStreamResponse struct {
+	Successful bool              `json:"success"`
+	Error      map[string]string `json:"error"`
+}
+
+type AuthenticationResponse struct {
+	Successful bool `json:"success"`
+}
+
+func (gs *GameService) EventManager(w http.ResponseWriter, r *http.Request) {
+	conn, err := gs.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	request := &AuthenticationRequest{}
+
+	err = conn.ReadJSON(request)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	user, userErr := gs.us.AuthenticateRequest(request.Email, request.AccessToken)
+	if userErr != nil {
+		err = conn.WriteJSON(userErr)
+		if err != nil {
+			log.Println(err)
+		}
+
+		return
+	}
+
+	gs.streams[user.UUID.String()] = &dataStream{conn, make(chan interface{}, 10), nil}
+	gs.streams[user.UUID.String()].broadcast <- &AuthenticationResponse{true}
+
+	go gs.readPump(user)
+	go gs.writePump(user)
+}
+
+type MoveBroadcast struct {
+	Type    string      `json:"type"`
+	Payload interface{} `json:"payload"`
+}
+
 type MoveRequest struct {
-	notation string
+	Notation     string
+	GameID       float64
+	RequestDraw  bool
+	Resign       bool
+	notationType string
+}
+
+type GameOutcome struct {
+	Result    string
+	IsDraw    bool
+	Winner    string `json:"winner,omitempty"`
+	Loser     string `json:"loser,omitempty"`
+	Method    string
+	NewRating int
 }
 
 type MoveResponse struct {
-	Successful bool         `json:"successful"`
-	Error      jsonerror.JE `json:"error,omitempty"`
+	Successful bool              `json:"successful"`
+	Error      map[string]string `json:"error,omitempty"`
 }
 
-func (gs *GameService) PlayGame(w http.ResponseWriter, r *http.Request, user *User, game *Game) {
-	var request MoveRequest
-	for {
-		err := json.NewDecoder(r.Body).Decode(&request)
-		if err != nil {
-			log.Println(err)
-			RenderNDJSONResponse(w, http.StatusBadRequest, &MoveResponse{false, jsonerror.New(
-				1,
-				"Invalid JSON Request",
-				err.Error(),
-			)})
-		}
+type GameRetrievalResponse struct {
+	Successful bool   `json:"success"`
+	FEN        string `json:"fen"`
+}
+
+func (gs *GameService) RetrieveActiveFEN(user *User) {
+	ds := gs.streams[user.UUID.String()]
+
+	ds.broadcast <- &GameRetrievalResponse{true, ds.activeGame.board.FEN()}
+}
+
+func (gs *GameService) Move(user *User, message map[string]interface{}) {
+	ds := gs.streams[user.UUID.String()]
+
+	moveRequest := &MoveRequest{}
+
+	var notationOk, gameIDOk, drawOk, resignOk, notationTypeOK bool
+
+	moveRequest.Notation, notationOk = message["notation"].(string)
+	moveRequest.notationType, notationTypeOK = message["notation_type"].(string)
+	if !notationTypeOK {
+		moveRequest.notationType = "algebraic"
 	}
+
+	moveRequest.GameID, gameIDOk = message["gameID"].(float64)
+	moveRequest.RequestDraw, drawOk = message["requestDraw"].(bool)
+	moveRequest.Resign, resignOk = message["resign"].(bool)
+
+	if !(notationOk && gameIDOk && drawOk && resignOk) {
+		ds.broadcast <- &MoveResponse{
+			false,
+			jsonerror.New(62, "Move request improperly formatted.", "Move request missing Notation or game ID.").Render(),
+		}
+		return
+	}
+
+	game := &Game{}
+	if gs.db.First(game, "id == ?", moveRequest.GameID).RowsAffected == 0 {
+		log.Println("Game does not exist with given ID: ", moveRequest.GameID)
+		ds.broadcast <- &MoveResponse{
+			false,
+			jsonerror.New(61, "Game does not exist with given ID.", "Game does not exist with given ID: "+strconv.FormatFloat(moveRequest.GameID, 'f', -1, 64)).Render(),
+		}
+		return
+	}
+
+	if game.board == nil && len(game.PGN) != 0 {
+		pgn, err := chess.PGN(strings.NewReader(game.PGN))
+		if err != nil {
+			ds.broadcast <- &MoveResponse{
+				false,
+				jsonerror.New(28, "Internal server error", "Error parsing game data").Render(),
+			}
+		}
+
+		game.board = chess.NewGame(pgn, chess.UseNotation(chess.AlgebraicNotation{}))
+	} else if len(game.PGN) == 0 {
+		game.board = chess.NewGame(chess.UseNotation(chess.AlgebraicNotation{}))
+	}
+
+	var color chess.Color
+
+	if color = chess.Color(slices.Index(game.Players, user.UUID.String()) + 1); color == chess.NoColor {
+		ds.broadcast <- &MoveResponse{false, jsonerror.New(60, "Game does not belong to you", "Game does not belong to you").Render()}
+		return
+	}
+
+	if game.board.Position().Turn() != color {
+		ds.broadcast <- &MoveResponse{false, jsonerror.New(59, "It is not your turn", "It is not your turn").Render()}
+		return
+	}
+
+	var decoder chess.Notation
+
+	switch moveRequest.notationType {
+	case "uci":
+		decoder = chess.UCINotation{}
+	case "long algebraic":
+		decoder = chess.LongAlgebraicNotation{}
+	default:
+		decoder = chess.AlgebraicNotation{}
+	}
+
+	move, err := decoder.Decode(game.board.Position(), moveRequest.Notation)
+
+	if err != nil {
+		ds.broadcast <- &MoveResponse{
+			false,
+			jsonerror.New(58, "Illegal move", err.Error()).Render(),
+		}
+		return
+	}
+
+	// For later sending to other clients
+	moveRequest.Notation = chess.AlgebraicNotation{}.Encode(game.board.Position(), move)
+
+	err = game.board.Move(move)
+	if err != nil {
+		ds.broadcast <- &MoveResponse{false, jsonerror.New(58, "Illegal move", err.Error()).Render()}
+		return
+	}
+
+	game.PGN = game.board.String()
+
+	gs.db.Save(game)
+
+	ds.broadcast <- &MoveResponse{true, nil}
+	for _, player := range game.Players {
+		gs.streams[player].broadcast <- &MoveBroadcast{Type: "move", Payload: moveRequest}
+		gs.streams[player].activeGame = game
+	}
+
+	if game.board.Outcome() == chess.NoOutcome {
+		return
+	}
+
+	var opponentUUID string
+	if game.Players[0] == user.UUID.String() {
+		opponentUUID = game.Players[1]
+	} else {
+		opponentUUID = game.Players[0]
+	}
+
+	opponentStream := gs.streams[opponentUUID]
+
+	gameResult := &GameOutcome{
+		Result: game.board.Outcome().String(),
+		Method: game.board.Method().String(),
+		IsDraw: false,
+	}
+
+	switch game.board.Outcome() {
+	case chess.WhiteWon:
+		if color == chess.White {
+			gameResult.Winner = user.UUID.String()
+			gameResult.Loser = opponentUUID
+		} else {
+			gameResult.Winner = opponentUUID
+			gameResult.Loser = user.UUID.String()
+		}
+	case chess.BlackWon:
+		if color == chess.Black {
+			gameResult.Winner = user.UUID.String()
+			gameResult.Loser = opponentUUID
+		} else {
+			gameResult.Winner = opponentUUID
+			gameResult.Loser = user.UUID.String()
+		}
+	case chess.Draw:
+		gameResult.IsDraw = true
+	}
+
+	ds.broadcast <- &MoveBroadcast{Type: "gameResult", Payload: gameResult}
+	opponentStream.broadcast <- &MoveBroadcast{Type: "gameResult", Payload: gameResult}
 }

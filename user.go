@@ -30,6 +30,7 @@ type UserService struct {
 	db          *gorm.DB
 	emailDialer *gomail.Dialer
 	privateKey  crypto.PrivateKey
+	publicKey   crypto.PublicKey
 }
 
 type User struct {
@@ -75,13 +76,26 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-func NewUserService(db *gorm.DB, emailDialer *gomail.Dialer, pemPath string) *UserService {
-	pem, err := os.ReadFile(pemPath)
+func NewUserService(db *gorm.DB, emailDialer *gomail.Dialer, privateKeyPath, publicKeyPath string) *UserService {
+	pem, err := os.ReadFile(privateKeyPath)
 	if err != nil {
 		panic(err)
 	}
 
 	privateKey, err := jwt.ParseECPrivateKeyFromPEM(pem)
+	if err != nil {
+		panic(err)
+	}
+
+	pem, err = os.ReadFile(publicKeyPath)
+	if err != nil {
+		panic(err)
+	}
+
+	pubicKey, err := jwt.ParseECPublicKeyFromPEM(pem)
+	if err != nil {
+		panic(err)
+	}
 
 	if err = db.AutoMigrate(&User{}); err != nil {
 		panic(err)
@@ -91,7 +105,7 @@ func NewUserService(db *gorm.DB, emailDialer *gomail.Dialer, pemPath string) *Us
 		panic(err)
 	}
 
-	service := &UserService{db, emailDialer, privateKey}
+	service := &UserService{db, emailDialer, privateKey, pubicKey}
 
 	http.HandleFunc("/register", service.HandleRegister)
 	http.HandleFunc("/verify", service.VerifyUser)
@@ -147,7 +161,7 @@ func (service *UserService) UnverifiedUserExists(email, verificationToken string
 	return service.db.First(&unverifiedUser, "email = ? AND verification_token = ?", email, verificationToken).Error == nil
 }
 
-// SendVerificationEmail Create and send a verification email
+// SendVerificationEmail Create and broadcast a verification email
 func (service *UserService) SendVerificationEmail(user UnverifiedUser, host string) {
 	tpl, err := ParseTemplate("verify-email.tmpl", fmt.Sprintf("http://%s/verify?token=%s&email=%s", host, user.VerificationToken, url.QueryEscape(user.Email)))
 	if err != nil {
@@ -409,7 +423,7 @@ func (service *UserService) GenerateAccessToken(user *User) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodES256,
 		jwt.MapClaims{
 			"uuid":   user.UUID,
-			"expiry": time.Now().Add(time.Minute * 15).Unix(),
+			"expiry": time.Now().Add(time.Hour).Unix(),
 		})
 
 	signedString, err := token.SignedString(service.privateKey)
@@ -483,7 +497,7 @@ func (service *UserService) AuthenticateRequest(email, accessToken string) (*Use
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 
-		return service.privateKey, nil
+		return service.publicKey, nil
 	})
 
 	if err != nil {
@@ -491,14 +505,14 @@ func (service *UserService) AuthenticateRequest(email, accessToken string) (*Use
 	}
 
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		expiryUnix, ok := claims["expiry"].(int64)
+		expiryUnix, ok := claims["expiry"].(float64)
 		if !ok {
-			return nil, NewUserError(15, "Error parsing token expiry", "Error parsing token expiry")
+			return nil, NewUserError(15, "Error parsing token expiry", "Error parsing token expiry: ")
 		}
 
-		expiry := time.Unix(expiryUnix, 0)
+		expiry := time.Unix(int64(expiryUnix), 0)
 		if time.Now().After(expiry) {
-			return nil, NewUserError(15, "Refresh token is expired", "Refresh token is expired")
+			return nil, NewUserError(15, "Access token is expired", "Access token is expired")
 		}
 
 		userID, ok := claims["uuid"].(string)
@@ -507,8 +521,8 @@ func (service *UserService) AuthenticateRequest(email, accessToken string) (*Use
 		}
 
 		user := &User{}
-		if service.db.First(&user, "uuid = ?", userID).Error != nil {
-			return nil, NewUserError(17, "User not found.", "User not found: "+userID)
+		if service.db.First(&user, "uuid = ? AND email = ?", userID, email).Error != nil {
+			return nil, NewUserError(17, "User not found.", "User not found with provided email or has incorrect access token.")
 		}
 
 		return user, nil

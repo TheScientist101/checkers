@@ -30,6 +30,7 @@ func main() {
 		db,
 		gomail.NewDialer("smtp.gmail.com", 587, os.Getenv("EMAIL_ADDRESS"), os.Getenv("EMAIL_PASSWORD")),
 		os.Getenv("PRIVATE_KEY_PATH"),
+		os.Getenv("PUBLIC_KEY_PATH"),
 	)
 
 	NewGameService(db, userService)
