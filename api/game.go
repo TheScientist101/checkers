@@ -459,8 +459,8 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 		gs.UpdateELO(user, opponent, 0.5)
 	}
 
-	ds.broadcast <- &broadcastMessage{Type: "gameResult", Payload: gameResult}
-	opponentStream.broadcast <- &broadcastMessage{Type: "gameResult", Payload: gameResult}
+	ds.broadcast <- &broadcastMessage{Type: "game_result", Payload: gameResult}
+	opponentStream.broadcast <- &broadcastMessage{Type: "game_result", Payload: gameResult}
 }
 
 // CalculateProbability Calculates probability for u1 to win the game
