@@ -321,8 +321,8 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 		moveRequest.notationType = "algebraic"
 	}
 
-	moveRequest.GameID, gameIDOk = message["gameID"].(float64)
-	moveRequest.RequestDraw, drawOk = message["requestDraw"].(bool)
+	moveRequest.GameID, gameIDOk = message["game_id"].(float64)
+	moveRequest.RequestDraw, drawOk = message["request_draw"].(bool)
 	moveRequest.Resign, resignOk = message["resign"].(bool)
 
 	if !(notationOk && gameIDOk && drawOk && resignOk) {
