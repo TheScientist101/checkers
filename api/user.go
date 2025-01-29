@@ -530,3 +530,8 @@ func (service *UserService) AuthenticateRequest(email, accessToken string) (*Use
 
 	return nil, NewUserError(15, "Invalid token", "Invalid token")
 }
+
+func (service *UserService) GetUser(uuid string) (*User, error) {
+	user := &User{}
+	return user, service.db.First(&user, "uuid = ?", uuid).Error
+}

@@ -2,8 +2,8 @@ package main
 
 import (
 	"log"
+	"math"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +13,6 @@ import (
 	"github.com/pjebs/jsonerror"
 	"github.com/scizorman/go-ndjson"
 	"github.com/unrolled/render"
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -29,13 +28,24 @@ const (
 )
 
 type Game struct {
-	ID        uint `gorm:"primarykey"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	Players   datatypes.JSONSlice[string]
-	PGN       string
-	board     *chess.Game
+	ID          uint `gorm:"primarykey"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	PlayerWhite string
+	PlayerBlack string
+	PGN         string
+	board       *chess.Game
+}
+
+func (g Game) getColor(uuid string) chess.Color {
+	if g.PlayerWhite == uuid {
+		return chess.White
+	} else if g.PlayerBlack == uuid {
+		return chess.Black
+	}
+
+	return chess.NoColor
 }
 
 type dataStream struct {
@@ -189,8 +199,9 @@ func (gs *GameService) Matchmaker() {
 	for {
 		players := []string{<-gs.gameRequests, <-gs.gameRequests}
 		game := &Game{
-			Players: datatypes.NewJSONSlice(players),
-			PGN:     "",
+			PlayerWhite: players[0],
+			PlayerBlack: players[1],
+			PGN:         "",
 		}
 
 		switch {
@@ -346,7 +357,7 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 
 	var color chess.Color
 
-	if color = chess.Color(slices.Index(game.Players, user.UUID.String()) + 1); color == chess.NoColor {
+	if color = game.getColor(user.UUID.String()); color == chess.NoColor {
 		ds.broadcast <- &MoveResponse{false, jsonerror.New(60, "Game does not belong to you", "Game does not belong to you").Render()}
 		return
 	}
@@ -391,7 +402,7 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 	gs.db.Save(game)
 
 	ds.broadcast <- &MoveResponse{true, nil}
-	for _, player := range game.Players {
+	for _, player := range []string{game.PlayerWhite, game.PlayerBlack} {
 		gs.streams[player].broadcast <- &MoveBroadcast{Type: "move", Payload: moveRequest}
 		gs.streams[player].activeGame = game
 	}
@@ -401,13 +412,19 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 	}
 
 	var opponentUUID string
-	if game.Players[0] == user.UUID.String() {
-		opponentUUID = game.Players[1]
+
+	if color == chess.White {
+		opponentUUID = game.PlayerBlack
 	} else {
-		opponentUUID = game.Players[0]
+		opponentUUID = game.PlayerWhite
 	}
 
 	opponentStream := gs.streams[opponentUUID]
+
+	opponent, err := gs.us.GetUser(opponentUUID)
+	if err != nil {
+		panic(err)
+	}
 
 	gameResult := &GameOutcome{
 		Result: game.board.Outcome().String(),
@@ -420,22 +437,51 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 		if color == chess.White {
 			gameResult.Winner = user.UUID.String()
 			gameResult.Loser = opponentUUID
+			gs.UpdateELO(user, opponent, 1.0)
 		} else {
 			gameResult.Winner = opponentUUID
 			gameResult.Loser = user.UUID.String()
+			gs.UpdateELO(opponent, user, 1.0)
 		}
 	case chess.BlackWon:
 		if color == chess.Black {
 			gameResult.Winner = user.UUID.String()
 			gameResult.Loser = opponentUUID
+			gs.UpdateELO(user, opponent, 1.0)
 		} else {
 			gameResult.Winner = opponentUUID
 			gameResult.Loser = user.UUID.String()
+			gs.UpdateELO(opponent, user, 1.0)
 		}
 	case chess.Draw:
 		gameResult.IsDraw = true
+		gs.UpdateELO(user, opponent, 0.5)
 	}
 
 	ds.broadcast <- &MoveBroadcast{Type: "gameResult", Payload: gameResult}
 	opponentStream.broadcast <- &MoveBroadcast{Type: "gameResult", Payload: gameResult}
+}
+
+// CalculateProbability Calculates probability for u1 to win the game
+func (gs *GameService) CalculateProbability(u1, u2 *User) float64 {
+	return 1.0 / (1 + math.Pow(10, float64(u2.ELO-u1.ELO)/400.0))
+}
+
+func (gs *GameService) CalculateELOK(user *User) float64 {
+	return max(400.0/float64(1+gs.db.Where("player_white = ?", user.UUID.String()).Or("player_black = ?", user.UUID.String()).Where(
+		"created_at >= ?",
+		time.Now().Add(-time.Hour*24*90),
+	).Find(&Game{}).RowsAffected), 30)
+}
+
+func (gs *GameService) UpdateELO(winner *User, loser *User, outcome float64) {
+	// Probabilities to win for the winner and loser
+	winnerProbability := gs.CalculateProbability(winner, loser)
+	loserProbability := gs.CalculateProbability(loser, winner)
+
+	kWinner := gs.CalculateELOK(winner)
+	kLoser := gs.CalculateELOK(loser)
+
+	winner.ELO += int(kWinner * (outcome - winnerProbability))
+	loser.ELO += int(kLoser * ((1 - outcome) - loserProbability))
 }
