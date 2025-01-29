@@ -292,7 +292,7 @@ type GameOutcome struct {
 }
 
 type MoveResponse struct {
-	Successful bool              `json:"successful"`
+	Successful bool              `json:"success"`
 	Error      map[string]string `json:"error,omitempty"`
 }
 
