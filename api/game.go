@@ -325,12 +325,33 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 	moveRequest.RequestDraw, drawOk = message["request_draw"].(bool)
 	moveRequest.Resign, resignOk = message["resign"].(bool)
 
-	if !(notationOk && gameIDOk && drawOk && resignOk) {
+	if !notationOk {
 		ds.broadcast <- &MoveResponse{
 			false,
-			jsonerror.New(62, "Move request improperly formatted.", "Move request missing Notation or game ID.").Render(),
+			jsonerror.New(62, "Move request improperly formatted.", "Failed to parse notation.").Render(),
 		}
 		return
+	}
+
+	if !gameIDOk {
+		ds.broadcast <- &MoveResponse{
+			false,
+			jsonerror.New(62, "Move request improperly formatted.", "Failed to parse game_id.").Render(),
+		}
+	}
+
+	if !drawOk {
+		ds.broadcast <- &MoveResponse{
+			false,
+			jsonerror.New(62, "Move request improperly formatted.", "Failed to parse request_draw.").Render(),
+		}
+	}
+
+	if !resignOk {
+		ds.broadcast <- &MoveResponse{
+			false,
+			jsonerror.New(62, "Move request improperly formatted.", "Failed to parse resign.").Render(),
+		}
 	}
 
 	game := &Game{}
