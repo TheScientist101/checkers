@@ -59,6 +59,11 @@ type socketMessage struct {
 	Payload map[string]interface{} `json:"payload"`
 }
 
+type broadcastMessage struct {
+	Type    string      `json:"type"`
+	Payload interface{} `json:"payload"`
+}
+
 func (gs *GameService) readPump(user *User) {
 	ds := gs.streams[user.UUID.String()]
 	defer func(conn *websocket.Conn) {
@@ -215,7 +220,7 @@ func (gs *GameService) Matchmaker() {
 		default:
 			gs.db.Create(game)
 			for _, player := range players {
-				gs.streams[player].broadcast <- game
+				gs.streams[player].broadcast <- &broadcastMessage{"game_start", game}
 				gs.streams[player].activeGame = game
 			}
 		}
@@ -268,11 +273,6 @@ func (gs *GameService) EventManager(w http.ResponseWriter, r *http.Request) {
 	go gs.writePump(user)
 }
 
-type MoveBroadcast struct {
-	Type    string      `json:"type"`
-	Payload interface{} `json:"payload"`
-}
-
 type MoveRequest struct {
 	Notation     string
 	GameID       float64
@@ -297,13 +297,14 @@ type MoveResponse struct {
 
 type GameRetrievalResponse struct {
 	Successful bool   `json:"success"`
+	Type       string `json:"type"`
 	FEN        string `json:"fen"`
 }
 
 func (gs *GameService) RetrieveActiveFEN(user *User) {
 	ds := gs.streams[user.UUID.String()]
 
-	ds.broadcast <- &GameRetrievalResponse{true, ds.activeGame.board.FEN()}
+	ds.broadcast <- &GameRetrievalResponse{true, "game_board", ds.activeGame.board.FEN()}
 }
 
 func (gs *GameService) Move(user *User, message map[string]interface{}) {
@@ -403,7 +404,7 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 
 	ds.broadcast <- &MoveResponse{true, nil}
 	for _, player := range []string{game.PlayerWhite, game.PlayerBlack} {
-		gs.streams[player].broadcast <- &MoveBroadcast{Type: "move", Payload: moveRequest}
+		gs.streams[player].broadcast <- &broadcastMessage{Type: "move", Payload: moveRequest}
 		gs.streams[player].activeGame = game
 	}
 
@@ -458,8 +459,8 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 		gs.UpdateELO(user, opponent, 0.5)
 	}
 
-	ds.broadcast <- &MoveBroadcast{Type: "gameResult", Payload: gameResult}
-	opponentStream.broadcast <- &MoveBroadcast{Type: "gameResult", Payload: gameResult}
+	ds.broadcast <- &broadcastMessage{Type: "gameResult", Payload: gameResult}
+	opponentStream.broadcast <- &broadcastMessage{Type: "gameResult", Payload: gameResult}
 }
 
 // CalculateProbability Calculates probability for u1 to win the game
