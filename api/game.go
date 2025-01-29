@@ -83,11 +83,12 @@ func (gs *GameService) readPump(user *User) {
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Println(err)
-				break
 			} else {
 				ds.broadcast <- jsonerror.New(1, "Invalid JSON request", err.Error())
 				continue
 			}
+
+			break
 		}
 
 		switch message.Type {

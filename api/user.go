@@ -350,6 +350,7 @@ func (service *UserService) ProcessUser(request *NewUserRequest, w http.Response
 type LoginResponse struct {
 	Successful  bool   `json:"success"`
 	AccessToken string `json:"access_token"`
+	UUID        string `json:"uuid"`
 }
 
 func (service *UserService) Login(w http.ResponseWriter, r *http.Request) {
@@ -410,7 +411,7 @@ func (service *UserService) Login(w http.ResponseWriter, r *http.Request) {
 			Domain:   r.Host,
 		})
 
-		RenderJSONResponse(w, 200, &LoginResponse{true, accessToken})
+		RenderJSONResponse(w, 200, &LoginResponse{true, accessToken, user.UUID.String()})
 		return
 	}
 
