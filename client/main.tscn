@@ -1,0 +1,383 @@
+[gd_scene load_steps=14 format=3 uid="uid://ce0m0lpdyghk0"]
+
+[ext_resource type="Script" path="res://main.gd" id="1_waox6"]
+[ext_resource type="Script" path="res://game.gd" id="2_xyjah"]
+[ext_resource type="Texture2D" uid="uid://bjkfaqnyvi52w" path="res://Chess.png" id="3_ikmsm"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_v036x"]
+texture = ExtResource("3_ikmsm")
+texture_region_size = Vector2i(32, 32)
+0:0/0 = 0
+1:0/0 = 0
+2:0/0 = 0
+3:0/0 = 0
+4:0/0 = 0
+5:0/0 = 0
+6:0/0 = 0
+7:0/0 = 0
+8:0/0 = 0
+0:1/0 = 0
+1:1/0 = 0
+2:1/0 = 0
+3:1/0 = 0
+4:1/0 = 0
+5:1/0 = 0
+6:1/0 = 0
+7:1/0 = 0
+8:1/0 = 0
+9:1/0 = 0
+9:0/0 = 0
+
+[sub_resource type="TileSet" id="TileSet_q3qtk"]
+tile_size = Vector2i(32, 32)
+sources/0 = SubResource("TileSetAtlasSource_v036x")
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_qidqw"]
+atlas = ExtResource("3_ikmsm")
+region = Rect2(64, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_xg1vb"]
+atlas = ExtResource("3_ikmsm")
+region = Rect2(32, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_q664o"]
+atlas = ExtResource("3_ikmsm")
+region = Rect2(96, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_bdb5m"]
+atlas = ExtResource("3_ikmsm")
+region = Rect2(128, 0, 32, 32)
+
+[sub_resource type="LabelSettings" id="LabelSettings_abf82"]
+font_size = 30
+
+[sub_resource type="LabelSettings" id="LabelSettings_h708x"]
+font_size = 25
+
+[sub_resource type="LabelSettings" id="LabelSettings_r40qd"]
+font_size = 30
+
+[sub_resource type="LabelSettings" id="LabelSettings_6nohb"]
+font_size = 20
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_waox6")
+
+[node name="CenterContainer2" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="GameThings" type="HBoxContainer" parent="CenterContainer2"]
+visible = false
+layout_mode = 2
+
+[node name="SubViewportContainer" type="SubViewportContainer" parent="CenterContainer2/GameThings"]
+layout_mode = 2
+
+[node name="SubViewport" type="SubViewport" parent="CenterContainer2/GameThings/SubViewportContainer"]
+handle_input_locally = false
+canvas_item_default_texture_filter = 0
+render_target_update_mode = 0
+
+[node name="Game" type="Node2D" parent="CenterContainer2/GameThings/SubViewportContainer/SubViewport"]
+script = ExtResource("2_xyjah")
+
+[node name="TileMap" type="TileMap" parent="CenterContainer2/GameThings/SubViewportContainer/SubViewport/Game"]
+scale = Vector2(2, 2)
+tile_set = SubResource("TileSet_q3qtk")
+format = 2
+layer_0/name = "Board"
+layer_0/tile_data = PackedInt32Array(0, 589824, 1, 458759, 589824, 1)
+layer_1/name = "Previous Move Highlight"
+layer_2/name = "Selection Highlight"
+layer_3/name = "Pieces"
+layer_4/name = "Indicators"
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer2/GameThings"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PromotionButtons" type="Control" parent="CenterContainer2/GameThings/VBoxContainer"]
+visible = false
+custom_minimum_size = Vector2(260, 0)
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 0.13
+
+[node name="HBoxContainer" type="HBoxContainer" parent="CenterContainer2/GameThings/VBoxContainer/PromotionButtons"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="KnightButton" type="Button" parent="CenterContainer2/GameThings/VBoxContainer/PromotionButtons/HBoxContainer"]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+size_flags_vertical = 3
+icon = SubResource("AtlasTexture_qidqw")
+flat = true
+expand_icon = true
+
+[node name="RookButton" type="Button" parent="CenterContainer2/GameThings/VBoxContainer/PromotionButtons/HBoxContainer"]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+size_flags_vertical = 3
+icon = SubResource("AtlasTexture_xg1vb")
+flat = true
+expand_icon = true
+
+[node name="BishopButton" type="Button" parent="CenterContainer2/GameThings/VBoxContainer/PromotionButtons/HBoxContainer"]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+size_flags_vertical = 3
+icon = SubResource("AtlasTexture_q664o")
+flat = true
+expand_icon = true
+
+[node name="QueenButton" type="Button" parent="CenterContainer2/GameThings/VBoxContainer/PromotionButtons/HBoxContainer"]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+size_flags_vertical = 3
+icon = SubResource("AtlasTexture_bdb5m")
+flat = true
+expand_icon = true
+
+[node name="InfoLabel" type="Label" parent="CenterContainer2/GameThings/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Info text here"
+label_settings = SubResource("LabelSettings_abf82")
+
+[node name="LoginThings" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="CenterContainer" type="CenterContainer" parent="LoginThings"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="LogIn" type="Control" parent="LoginThings/CenterContainer"]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="LoginThings/CenterContainer/LogIn"]
+custom_minimum_size = Vector2(500, 0)
+layout_mode = 2
+offset_left = -250.0
+offset_top = -108.5
+offset_right = 250.0
+offset_bottom = 108.5
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+
+[node name="EmailLabel" type="Label" parent="LoginThings/CenterContainer/LogIn/VBoxContainer"]
+layout_mode = 2
+text = "Email"
+label_settings = SubResource("LabelSettings_h708x")
+
+[node name="EmailEdit" type="LineEdit" parent="LoginThings/CenterContainer/LogIn/VBoxContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+
+[node name="PasswordLabel" type="Label" parent="LoginThings/CenterContainer/LogIn/VBoxContainer"]
+layout_mode = 2
+text = "Password"
+label_settings = SubResource("LabelSettings_h708x")
+
+[node name="PasswordEdit" type="LineEdit" parent="LoginThings/CenterContainer/LogIn/VBoxContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+secret = true
+
+[node name="LogInButton" type="Button" parent="LoginThings/CenterContainer/LogIn/VBoxContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 25
+text = "Log In"
+
+[node name="FeedbackLabel" type="Label" parent="LoginThings/CenterContainer/LogIn/VBoxContainer"]
+layout_mode = 2
+label_settings = SubResource("LabelSettings_h708x")
+
+[node name="SignUpInsteadButton" type="Button" parent="LoginThings/CenterContainer/LogIn/VBoxContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+size_flags_horizontal = 8
+theme_override_font_sizes/font_size = 25
+text = "Sign up instead"
+alignment = 2
+
+[node name="LogInHTTPRequest" type="HTTPRequest" parent="LoginThings/CenterContainer/LogIn"]
+
+[node name="SignUp" type="Control" parent="LoginThings/CenterContainer"]
+visible = false
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="LoginThings/CenterContainer/SignUp"]
+custom_minimum_size = Vector2(500, 0)
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+
+[node name="NameLabel" type="Label" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+layout_mode = 2
+text = "Name"
+label_settings = SubResource("LabelSettings_h708x")
+
+[node name="FirstNameEdit" type="LineEdit" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+placeholder_text = "First"
+
+[node name="LastNameEdit" type="LineEdit" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+placeholder_text = "Last"
+
+[node name="EmailLabel" type="Label" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+layout_mode = 2
+text = "Email"
+label_settings = SubResource("LabelSettings_h708x")
+
+[node name="EmailEdit" type="LineEdit" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+
+[node name="PasswordLabel" type="Label" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+layout_mode = 2
+text = "Password"
+label_settings = SubResource("LabelSettings_h708x")
+
+[node name="PasswordEdit" type="LineEdit" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+secret = true
+
+[node name="ConfirmPasswordLabel" type="Label" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+layout_mode = 2
+text = "Confirm Password"
+label_settings = SubResource("LabelSettings_h708x")
+
+[node name="ConfirmPasswordEdit" type="LineEdit" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+secret = true
+
+[node name="SignUpButton" type="Button" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 25
+text = "Sign Up"
+
+[node name="FeedbackLabel" type="Label" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+layout_mode = 2
+label_settings = SubResource("LabelSettings_h708x")
+
+[node name="BackButton" type="Button" parent="LoginThings/CenterContainer/SignUp/VBoxContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+size_flags_horizontal = 8
+theme_override_font_sizes/font_size = 25
+text = "Back to login"
+alignment = 2
+
+[node name="SignUpHTTPRequest" type="HTTPRequest" parent="LoginThings/CenterContainer/SignUp"]
+
+[node name="NewGame" type="Button" parent="."]
+visible = false
+custom_minimum_size = Vector2(200, 50)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -46.5
+offset_top = -15.5
+offset_right = 46.5
+offset_bottom = 15.5
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 25
+text = "New Game"
+
+[node name="HTTPRequest" type="HTTPRequest" parent="."]
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="WinLabel" type="Label" parent="CenterContainer/VBoxContainer"]
+visible = false
+layout_mode = 2
+text = "win text"
+label_settings = SubResource("LabelSettings_r40qd")
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="WinButton" type="Button" parent="CenterContainer/VBoxContainer"]
+visible = false
+layout_mode = 2
+text = "Continue"
+
+[node name="LoadingIndicator" type="Label" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -370.5
+offset_top = -24.5
+offset_right = 370.5
+offset_bottom = 24.5
+grow_horizontal = 2
+grow_vertical = 2
+text = "Waiting for opponent..."
+label_settings = SubResource("LabelSettings_6nohb")
+horizontal_alignment = 1
+
+[connection signal="pressed" from="CenterContainer2/GameThings/VBoxContainer/PromotionButtons/HBoxContainer/KnightButton" to="CenterContainer2/GameThings/SubViewportContainer/SubViewport/Game" method="_on_knight_button_pressed"]
+[connection signal="pressed" from="CenterContainer2/GameThings/VBoxContainer/PromotionButtons/HBoxContainer/RookButton" to="CenterContainer2/GameThings/SubViewportContainer/SubViewport/Game" method="_on_rook_button_pressed"]
+[connection signal="pressed" from="CenterContainer2/GameThings/VBoxContainer/PromotionButtons/HBoxContainer/BishopButton" to="CenterContainer2/GameThings/SubViewportContainer/SubViewport/Game" method="_on_bishop_button_pressed"]
+[connection signal="pressed" from="CenterContainer2/GameThings/VBoxContainer/PromotionButtons/HBoxContainer/QueenButton" to="CenterContainer2/GameThings/SubViewportContainer/SubViewport/Game" method="_on_queen_button_pressed"]
+[connection signal="pressed" from="LoginThings/CenterContainer/LogIn/VBoxContainer/LogInButton" to="." method="_on_log_in_button_pressed"]
+[connection signal="pressed" from="LoginThings/CenterContainer/LogIn/VBoxContainer/SignUpInsteadButton" to="." method="_on_sign_up_instead_button_pressed"]
+[connection signal="pressed" from="LoginThings/CenterContainer/SignUp/VBoxContainer/SignUpButton" to="." method="_on_sign_up_button_pressed"]
+[connection signal="pressed" from="LoginThings/CenterContainer/SignUp/VBoxContainer/BackButton" to="." method="_on_back_button_pressed"]
+[connection signal="pressed" from="NewGame" to="CenterContainer2/GameThings/SubViewportContainer/SubViewport/Game" method="_on_new_game_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/WinButton" to="CenterContainer2/GameThings/SubViewportContainer/SubViewport/Game" method="_on_win_button_pressed"]
