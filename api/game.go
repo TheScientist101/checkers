@@ -249,6 +249,8 @@ type AuthenticationResponse struct {
 }
 
 func (gs *GameService) EventManager(w http.ResponseWriter, r *http.Request) {
+	SetCors(&w)
+
 	conn, err := gs.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
