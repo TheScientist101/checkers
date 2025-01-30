@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"log"
 	"math"
 	"net/http"
@@ -49,9 +51,10 @@ func (g Game) getColor(uuid string) chess.Color {
 }
 
 type dataStream struct {
-	conn       *websocket.Conn
-	broadcast  chan interface{}
-	activeGame *Game
+	conn              *websocket.Conn
+	broadcast         chan interface{}
+	activeGame        *Game
+	lastBoardPosition string
 }
 
 type socketMessage struct {
@@ -81,10 +84,11 @@ func (gs *GameService) readPump(user *User) {
 		message := &socketMessage{}
 		err := ds.conn.ReadJSON(message)
 		if err != nil {
+			var syntaxError *json.SyntaxError
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Println(err)
-			} else {
-				ds.broadcast <- jsonerror.New(1, "Invalid JSON request", err.Error())
+			} else if errors.As(err, &syntaxError) {
+				ds.broadcast <- jsonerror.New(1, "Invalid JSON request", syntaxError.Error())
 				continue
 			}
 
@@ -95,7 +99,7 @@ func (gs *GameService) readPump(user *User) {
 		case "move":
 			gs.Move(user, message.Payload)
 		case "position":
-			gs.RetrieveActiveFEN(user)
+			gs.RetrieveLastPositionFEN(user)
 		}
 	}
 }
@@ -267,7 +271,7 @@ func (gs *GameService) EventManager(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gs.streams[user.UUID.String()] = &dataStream{conn, make(chan interface{}, 10), nil}
+	gs.streams[user.UUID.String()] = &dataStream{conn, make(chan interface{}, 10), nil, chess.StartingPosition().String()}
 	gs.streams[user.UUID.String()].broadcast <- &AuthenticationResponse{true}
 
 	go gs.readPump(user)
@@ -283,12 +287,12 @@ type MoveRequest struct {
 }
 
 type GameOutcome struct {
-	Result    string
-	IsDraw    bool
+	Result    string `json:"result"`
+	IsDraw    bool   `json:"is_draw"`
 	Winner    string `json:"winner,omitempty"`
 	Loser     string `json:"loser,omitempty"`
-	Method    string
-	NewRating int
+	Method    string `json:"method,omitempty"`
+	NewRating int    `json:"new_rating"`
 }
 
 type MoveResponse struct {
@@ -302,10 +306,10 @@ type GameRetrievalResponse struct {
 	FEN        string `json:"fen"`
 }
 
-func (gs *GameService) RetrieveActiveFEN(user *User) {
+func (gs *GameService) RetrieveLastPositionFEN(user *User) {
 	ds := gs.streams[user.UUID.String()]
 
-	ds.broadcast <- &GameRetrievalResponse{true, "game_board", ds.activeGame.board.FEN()}
+	ds.broadcast <- &GameRetrievalResponse{true, "game_board", ds.lastBoardPosition}
 }
 
 func (gs *GameService) Move(user *User, message map[string]interface{}) {
@@ -428,6 +432,7 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 	for _, player := range []string{game.PlayerWhite, game.PlayerBlack} {
 		gs.streams[player].broadcast <- &broadcastMessage{Type: "move", Payload: moveRequest}
 		gs.streams[player].activeGame = game
+		gs.streams[player].lastBoardPosition = game.board.FEN()
 	}
 
 	if game.board.Outcome() == chess.NoOutcome {
@@ -483,6 +488,9 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 
 	ds.broadcast <- &broadcastMessage{Type: "game_result", Payload: gameResult}
 	opponentStream.broadcast <- &broadcastMessage{Type: "game_result", Payload: gameResult}
+
+	ds.activeGame = nil
+	opponentStream.activeGame = nil
 }
 
 // CalculateProbability Calculates probability for u1 to win the game
@@ -507,4 +515,7 @@ func (gs *GameService) UpdateELO(winner *User, loser *User, outcome float64) {
 
 	winner.ELO += int(kWinner * (outcome - winnerProbability))
 	loser.ELO += int(kLoser * ((1 - outcome) - loserProbability))
+
+	gs.db.Save(winner)
+	gs.db.Save(loser)
 }
