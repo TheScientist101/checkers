@@ -199,6 +199,8 @@ func ShowError(w http.ResponseWriter) {
 }
 
 func (service *UserService) VerifyUser(w http.ResponseWriter, r *http.Request) {
+	SetCors(&w)
+
 	if r.Method != http.MethodGet {
 		return
 	}
@@ -275,6 +277,8 @@ func (service *UserService) VerifyUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (service *UserService) HandleRegister(w http.ResponseWriter, r *http.Request) {
+	SetCors(&w)
+
 	if r.Method != http.MethodPost {
 		return
 	}
@@ -354,6 +358,8 @@ type LoginResponse struct {
 }
 
 func (service *UserService) Login(w http.ResponseWriter, r *http.Request) {
+	SetCors(&w)
+
 	if r.Method != http.MethodPost {
 		return
 	}

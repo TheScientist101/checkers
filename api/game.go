@@ -190,6 +190,8 @@ type NewGameResponse struct {
 }
 
 func (gs *GameService) NewGame(w http.ResponseWriter, r *http.Request) {
+	SetCors(&w)
+
 	user, userErr := gs.us.AuthenticateRequest(r.URL.Query().Get("email"), r.Header.Get("Authorization"))
 
 	if userErr != nil {
