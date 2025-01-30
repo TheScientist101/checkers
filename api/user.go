@@ -163,7 +163,7 @@ func (service *UserService) UnverifiedUserExists(email, verificationToken string
 
 // SendVerificationEmail Create and broadcast a verification email
 func (service *UserService) SendVerificationEmail(user UnverifiedUser, host string) {
-	tpl, err := ParseTemplate("verify-email.tmpl", fmt.Sprintf("http://%s/verify?token=%s&email=%s", host, user.VerificationToken, url.QueryEscape(user.Email)))
+	tpl, err := ParseTemplate("verify-email.tmpl", fmt.Sprintf("https://%s/verify?token=%s&email=%s", host, user.VerificationToken, url.QueryEscape(user.Email)))
 	if err != nil {
 		log.Fatalln(err)
 	}

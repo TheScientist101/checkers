@@ -31,3 +31,5 @@ go.work.sum
 .idea/
 
 *.pem
+
+.DS_Store
