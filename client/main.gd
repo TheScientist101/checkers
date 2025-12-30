@@ -1,6 +1,6 @@
 extends Control
 
-var url := "checkers.thescientist101.hackclub.app"
+var url := "checkers.urjith.dev"
 
 var access_token : String
 var uuid : String
