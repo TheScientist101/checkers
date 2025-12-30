@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -17,7 +18,15 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
-	db, err := gorm.Open(sqlite.Open("development.db"), &gorm.Config{})
+	var db *gorm.DB
+
+	if os.Getenv("POSTGRES_DSN") != "" {
+		log.Println("Using POSTGRES_DSN from environment")
+		dsn := os.Getenv("POSTGRES_DSN")
+		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	} else {
+		db, err = gorm.Open(sqlite.Open("development.db"), &gorm.Config{})
+	}
 	if err != nil {
 		panic(err)
 	}
