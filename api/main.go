@@ -1,24 +1,21 @@
 package main
 
 import (
-	"gopkg.in/gomail.v2"
 	"log"
 	"net/http"
 	"os"
 
-	"github.com/joho/godotenv"
+	"gopkg.in/gomail.v2"
+
+	_ "github.com/joho/godotenv/autoload"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
 	var db *gorm.DB
+	var err error
 
 	if os.Getenv("POSTGRES_DSN") != "" {
 		log.Println("Using POSTGRES_DSN from environment")
