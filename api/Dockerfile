@@ -11,5 +11,6 @@ FROM alpine:latest AS runner
 WORKDIR /app
 COPY --from=builder /app/checkers .
 COPY --from=builder /app/*.pem .
+COPY --from=builder /app/templates ./templates
 EXPOSE 8080
 ENTRYPOINT ["./checkers"]
