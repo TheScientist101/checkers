@@ -1941,7 +1941,7 @@ func _process(_delta) -> void:
 						elif json["payload"]["winner"] == cache_uuid:
 							$"../../../../../CenterContainer/VBoxContainer/WinLabel".text = "You win!!!!!!!!!!!!"
 						else:
-							$"../../../../../CenterContainer/VBoxContainer/WinLabel".text = "Loser"
+							$"../../../../../CenterContainer/VBoxContainer/WinLabel".text = "Better luck next time!"
 						
 						$"../../../../../CenterContainer/VBoxContainer/WinLabel".visible = true
 						$"../../../../../CenterContainer/VBoxContainer/WinButton".visible = true
