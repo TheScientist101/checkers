@@ -283,7 +283,7 @@ func (gs *GameService) EventManager(w http.ResponseWriter, r *http.Request) {
 
 type MoveRequest struct {
 	Notation     string
-	GameID       float64
+	GameID       int64
 	RequestDraw  bool
 	Resign       bool
 	notationType string
@@ -328,7 +328,8 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 		moveRequest.notationType = "algebraic"
 	}
 
-	moveRequest.GameID, gameIDOk = message["game_id"].(float64)
+	gameID, gameIDOk := message["game_id"].(float64)
+	moveRequest.GameID = int64(math.Floor(gameID))
 	moveRequest.RequestDraw, drawOk = message["request_draw"].(bool)
 	moveRequest.Resign, resignOk = message["resign"].(bool)
 
@@ -362,11 +363,11 @@ func (gs *GameService) Move(user *User, message map[string]interface{}) {
 	}
 
 	game := &Game{}
-	if gs.db.First(game, "id == ?", moveRequest.GameID).RowsAffected == 0 {
+	if gs.db.First(&game, moveRequest.GameID).RowsAffected == 0 {
 		log.Println("Game does not exist with given ID: ", moveRequest.GameID)
 		ds.broadcast <- &MoveResponse{
 			false,
-			jsonerror.New(61, "Game does not exist with given ID.", "Game does not exist with given ID: "+strconv.FormatFloat(moveRequest.GameID, 'f', -1, 64)).Render(),
+			jsonerror.New(61, "Game does not exist with given ID.", "Game does not exist with given ID: "+strconv.FormatInt(moveRequest.GameID, 10)).Render(),
 		}
 		return
 	}
