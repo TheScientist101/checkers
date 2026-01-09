@@ -1,6 +1,6 @@
 extends Control
 
-var url := "checkers.urjith.dev"
+var url := "known-leela-checkers-46031859.koyeb.app"
 
 var access_token : String
 var uuid : String
